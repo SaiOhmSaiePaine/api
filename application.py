@@ -9,6 +9,12 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 
+
+def _validate_name(value):
+    if not isinstance(value, str) or not value.strip():
+        return False
+    return True
+
 #Define the Data model
 class Drink(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -47,12 +53,12 @@ def get_drinks():
     per_page = request.args.get('per_page', 10, type=int)
 
     per_page = min(max(per_page, 1), 100)
-    pagninated = query.paginate(page=page, per_page=per_page, error_out=False)
+    paginated = query.paginate(page=page, per_page=per_page, error_out=False)
 
-    return jsonify({'drinks': [drink.to_dict() for drink in pagninated.items], 
-                    'total': pagninated.total,
-                    'page': pagninated.page,
-                    'pages': pagninated.pages})
+    return jsonify({'drinks': [drink.to_dict() for drink in paginated.items], 
+                    'total': paginated.total,
+                    'page': paginated.page,
+                    'pages': paginated.pages})
 
 
 # GET: Retrieve a single drink by ID
@@ -66,9 +72,16 @@ def get_drink(id):
 @app.route('/drinks', methods=['POST'])
 def add_drink():
     data = request.get_json(silent=True) or {}
+    if not _validate_name(data.get('name')):
+        return jsonify({'error': 'Missing or invalid field: name'}), 400
+
+    description = data.get('description', '')
+    if description is not None and not isinstance(description, str):
+        return jsonify({'error': 'Invalid field: description'}), 400
+
     drink = Drink(
-        name=data['name'],
-        description=data.get('description', '')
+        name=data['name'].strip(),
+        description=description or ''
     )
     db.session.add(drink)
     db.session.commit()
@@ -78,7 +91,7 @@ def add_drink():
 # DELETE: Remove a drink by ID
 @app.route('/drinks/<int:id>', methods=['DELETE'])
 def delete_drink(id):
-    drink = Drink.query.get(id)
+    drink = db.session.get(Drink, id)
     if drink is None:
         return jsonify({'error': "not found"}), 404
     db.session.delete(drink)
@@ -89,7 +102,7 @@ def delete_drink(id):
 # PUT / PATCH: Update a drink by ID
 @app.route('/drinks/<int:id>', methods=['PUT', 'PATCH'])
 def update_drink(id):
-    drink = Drink.query.get(id)
+    drink = db.session.get(Drink, id)
     if drink is None:
         return jsonify({'error': "Drink not found"}), 404
 
@@ -97,14 +110,21 @@ def update_drink(id):
 
     if request.method == 'PUT':
         # Put expect complete replacement: validate required fields
-        if 'name' not in data:
-            return jsonify({'error': 'Missing required field: name'}), 400
-        drink.name = data['name']
-        drink.description = data.get('description', '')
+        if not _validate_name(data.get('name')):
+            return jsonify({'error': 'Missing or invalid field: name'}), 400
+        description = data.get('description', '')
+        if description is not None and not isinstance(description, str):
+            return jsonify({'error': 'Invalid field: description'}), 400
+        drink.name = data['name'].strip()
+        drink.description = description or ''
     else:
         if 'name' in data:
-            drink.name = data['name']
+            if not _validate_name(data['name']):
+                return jsonify({'error': 'Invalid field: name'}), 400
+            drink.name = data['name'].strip()
         if 'description' in data:
+            if data['description'] is not None and not isinstance(data['description'], str):
+                return jsonify({'error': 'Invalid field: description'}), 400
             drink.description = data['description']
 
     db.session.commit()
